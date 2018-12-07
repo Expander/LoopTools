@@ -458,6 +458,21 @@ PARALLEL = $CONF_PARALLEL
 
 _EOF_
 
+echo "creating looptools.pc" 1>&3
+
+cat > looptools.pc << _EOF_
+prefix=${CONF_PREFIX}
+exec_prefix=\${prefix}/bin
+libdir=\${prefix}/lib${CONF_LIBDIRSUFFIX}
+includedir=\${prefix}/include
+
+Name: LoopTools
+Description: Package for evaluation of scalar and tensor one-loop integrals
+Version: 2.15
+Requires:
+Libs: -L\${libdir} -looptools${CONF_QUAD:+-quad}
+Cflags: -I\${includedir}
+_EOF_
 
 echo "
 now you must run make
