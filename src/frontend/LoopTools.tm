@@ -105,6 +105,12 @@
 	GetZeroEps::usage = "GetZeroEps[] returns the tolerance used in testing numbers for zero."
 
 :Evaluate:
+	LTini::usage = "LTini[] (re-)initializes LoopTools.";
+	LTexi::usage = "LTexi[] gives a summary of all errors and warnings since the last LTini[].";
+	LTnop::usage = "LTnop[] does nothing.";
+	LTwrite::usage = "LTwrite[s] is the function LoopTools calls for printing s."
+
+:Evaluate:
 	DRResult::usage = "DRResult[c0, c1, c2] arranges the coefficients of DR1eps into the final returned to the user.";
 	DR1eps::usage = "DR1eps represents 1/eps where D = 4 - 2 eps."
 
@@ -162,12 +168,13 @@
 	DB1 = B0i[dbb1, ##]&;
 	DB00 = B0i[dbb00, ##]&;
 	DB11 = B0i[dbb11, ##]&;
+	DB001 = B0i[dbb001, ##]&;
 	C0 = C0i[cc0, ##]&;
 	D0 = D0i[dd0, ##]&;
 	E0 = E0i[ee0, ##]&
 
 :Evaluate:
-	{LTini, LTexi, If[!ValueQ[LTwrite], LTwrite = WriteString[$Output, #]&]}
+	If[!ValueQ[LTwrite], LTwrite = WriteString[$Output, #]&]
 
 :Evaluate: Begin["`Private`"]
 
@@ -705,6 +712,14 @@
 :ReturnType:	Manual
 :End:
 
+:Begin:
+:Function:	mltnop
+:Pattern:	LTnop[]
+:Arguments:	{}
+:ArgumentTypes:	{}
+:ReturnType:	Manual
+:End:
+
 :Evaluate: r = Head[# + 1.] === Real &
 
 :Evaluate: c = Head[# + 1. I] === Complex &
@@ -737,7 +752,7 @@
 	ltdefs[off_, h_] := StringJoin@@ MapThread[{ h[off]@@@ #,
 	  "#define ", #2, " ", ToString[3 Length[#]], "\n\n" }&,
 	  {LTids, {"Naa", "Nbb", "Ncc", "Ndd", "Nee"}}];
-	ltwrite[] := {
+	ltwritedefs[] := {
 	  WriteString["for_looptools.h", ltdefs[0, ltdef1]];
 	  WriteString["for_clooptools.h.in", ltdefs[-1, ltdef1]];
 	  WriteString["for_defs.h", ltdefs[0, ltdef2]] }
@@ -747,7 +762,7 @@
 :Evaluate: EndPackage[]
 
 :Evaluate:
-	($Post := (LTini[]; OwnValues[$Post] = #; Identity))& @
+	($Post := (LTnop[]; OwnValues[$Post] = #; $Post /. $Post -> Identity))& @
 	  OwnValues[$Post];
 	($Epilog := (LTexi[]; OwnValues[$Epilog] = #; $Epilog))& @
 	  OwnValues[$Epilog];
@@ -756,7 +771,7 @@
 	LoopTools.tm
 		provides the LoopTools functions in Mathematica
 		this file is part of LoopTools
-		last modified 25 May 18 th
+		last modified 3 May 21 th
 */
 
 
@@ -799,16 +814,70 @@ static inline void MLPutREALList(MLINK mlp, CREAL *s, long n) {
 #define MLPutREALList MLPutRealList
 #endif
 
-static int stdoutorig = -1, stdoutpipe[2] = {2, 2}, stdoutthr = 0;
+static int stdoutorig = 1, stdoutpipe[2] = {2, 2}, stdoutthr = 0;
 static byte *stdoutbuf = NULL;
+
+//#define DEBUG
+#ifdef DEBUG
+static FILE *deb;
+#define DEB(...) fprintf(deb, __VA_ARGS__)
+#else
+#define DEB(...)
+#endif
+
+static inline void mlPutFunction(MLINK mlp, cchar *fun, cint args) {
+  MLPutFunction(mlp, fun, args);
+  DEB("MLPutFunction(\"%s\", %d)\n", fun, args);
+}
+
+static inline void mlPutSymbol(MLINK mlp, cchar *sym) {
+  MLPutSymbol(mlp, sym);
+  DEB("MLPutSymbol(\"%s\")\n", sym);
+}
+
+static inline void mlPutReal(MLINK mlp, cRealType r) {
+  MLPutReal(mlp, r);
+  DEB("MLPutReal(%lg)\n", r);
+}
+
+static inline void mlPutInteger(MLINK mlp, cint i) {
+  MLPutInteger(mlp, i);
+  DEB("MLPutInteger(%d)\n", i);
+}
+
+static inline void mlPutByteString(MLINK mlp, byte *s, size_t len) {
+  MLPutByteString(mlp, s, len);
+  DEB("MLPutByteString(\"%*s\", %lu)\n", (int)len, s, len);
+}
+
+static inline void mlEndPacket(MLINK mlp) {
+  MLEndPacket(mlp);
+  DEB("MLEndPacket\n");
+}
+
+static inline void mlNewPacket(MLINK mlp) {
+  MLNewPacket(mlp);
+  DEB("MLNewPacket\n");
+}
+
+static inline void mlNextPacket(MLINK mlp) {
+  MLNextPacket(mlp);
+  DEB("MLNextPacket\n");
+}
 
 /******************************************************************/
 
-#define CaptureStdout() dup2(stdoutpipe[1], 1)
+#define CaptureStdout() \
+  DEB("%s\n", __FUNCTION__); \
+  dup2(stdoutpipe[1], 1)
 
-static inline void MLPutStdout(MLINK mlp) {
+#define ReleaseStdout() \
+  dup2(stdoutorig, 1)
+
+static inline void mlPutStdout(MLINK mlp) {
   long len;
   extern void FORTRAN(fortranflush)();
+char buf[1024];
 
   FORTRAN(fortranflush)();
   fflush(stdout);
@@ -817,13 +886,17 @@ static inline void MLPutStdout(MLINK mlp) {
     write(1, "", 1);
     read(1, &len, sizeof len);
     if( len > 1 ) {
-      MLPutFunction(mlp, "CompoundExpression", 2);
-      MLPutFunction(mlp, "LoopTools`LTwrite", 1);
-      MLPutByteString(mlp, stdoutbuf, len - 1);
+      DEB("MLPutStdout <<\n");
+      mlPutFunction(mlp, "EvaluatePacket", 1);
+      mlPutFunction(mlp, "LoopTools`LTwrite", 1);
+      mlPutByteString(mlp, stdoutbuf, len - 1);
+      mlNextPacket(stdlink);
+      mlNewPacket(stdlink);
+      DEB(">>\n");
     }
   }
 
-  dup2(stdoutorig, 1);
+  ReleaseStdout();
 }
 
 /******************************************************************/
@@ -850,24 +923,24 @@ static void *capturestdout(void *pfd) {
 #define SetReal(fun,val) \
   CaptureStdout(); \
   fun(val); \
-  MLPutStdout(stdlink); \
-  MLPutReal(stdlink, val); \
-  MLEndPacket(stdlink)
+  mlPutStdout(stdlink); \
+  mlPutReal(stdlink, val); \
+  mlEndPacket(stdlink)
 
 #define GetReal(fun) \
-  MLPutReal(stdlink, fun()); \
-  MLEndPacket(stdlink)
+  mlPutReal(stdlink, fun()); \
+  mlEndPacket(stdlink)
 
 #define SetInteger(fun,val) \
   CaptureStdout(); \
   fun(val); \
-  MLPutStdout(stdlink); \
-  MLPutInteger(stdlink, val); \
-  MLEndPacket(stdlink)
+  mlPutStdout(stdlink); \
+  mlPutInteger(stdlink, val); \
+  mlEndPacket(stdlink)
 
 #define GetInteger(fun) \
-  MLPutInteger(stdlink, fun()); \
-  MLEndPacket(stdlink)
+  mlPutInteger(stdlink, fun()); \
+  mlEndPacket(stdlink)
 
 /******************************************************************/
 
@@ -875,21 +948,21 @@ static void *capturestdout(void *pfd) {
   ComplexType result; \
   CaptureStdout(); \
   result = expr; \
-  MLPutStdout(stdlink); \
-  MLPutComplex(stdlink, result); \
-  MLEndPacket(stdlink)
+  mlPutStdout(stdlink); \
+  mlPutComplex(stdlink, result); \
+  mlEndPacket(stdlink)
 
 #define ReturnList(i, expr, n) \
   COMPLEX *list; \
   CaptureStdout(); \
   list = expr; \
-  MLPutStdout(stdlink); \
-  MLPutList(stdlink, i, list, n); \
-  MLEndPacket(stdlink)
+  mlPutStdout(stdlink); \
+  mlPutList(stdlink, i, list, n); \
+  mlEndPacket(stdlink)
 
 #define ReturnVoid() \
-  MLPutSymbol(stdlink, "Null"); \
-  MLEndPacket(stdlink)
+  mlPutSymbol(stdlink, "Null"); \
+  mlEndPacket(stdlink)
 
 #define _Id_(v) v
 #define _Mr_(v) cRealType v
@@ -898,7 +971,8 @@ static void *capturestdout(void *pfd) {
 
 /******************************************************************/
 
-static inline void MLPutComplex(MLINK mlp, cComplexType c) {
+static inline void mlPutComplex(MLINK mlp, cComplexType c) {
+  DEB("MLPutComplex(%lg,%lg)\n", Re(c), Im(c));
   if( Im(c) == 0 ) MLPutREAL(mlp, Re(c));
   else {
     MLPutFunction(mlp, "Complex", 2);
@@ -909,7 +983,8 @@ static inline void MLPutComplex(MLINK mlp, cComplexType c) {
 
 /******************************************************************/
 
-static inline void MLPutList(MLINK mlp, cint i, COMPLEX *list, cint n) {
+static inline void mlPutList(MLINK mlp, cint i, COMPLEX *list, cint n) {
+  DEB("MLPutList(%d, %d)\n", i, n);
   MLPutFunction(mlp, "LoopTools`Private`idlist", 2);
   MLPutInteger(mlp, i);
   MLPutREALList(mlp, (REAL *)list, 2*n);
@@ -1158,10 +1233,10 @@ static void mgetdebugkey(void) {
 
 static void msetdebugrange(cint debugfrom, cint debugto) {
   setdebugrange(debugfrom, debugto);
-  MLPutFunction(stdlink, "List", 2);
-  MLPutInteger(stdlink, debugfrom);
-  MLPutInteger(stdlink, debugto);
-  MLEndPacket(stdlink);
+  mlPutFunction(stdlink, "List", 2);
+  mlPutInteger(stdlink, debugfrom);
+  mlPutInteger(stdlink, debugto);
+  mlEndPacket(stdlink);
 }
 
 /******************************************************************/
@@ -1199,14 +1274,20 @@ static void mgetzeroeps(void) {
 static void mltini(void) {
   CaptureStdout();
   ltini();
-  MLPutStdout(stdlink);
+  mlPutStdout(stdlink);
   ReturnVoid();
 }
 
 static void mltexi(void) {
   CaptureStdout();
   ltexi();
-  MLPutStdout(stdlink);
+  mlPutStdout(stdlink);
+  ReturnVoid();
+}
+
+static void mltnop(void) {
+  CaptureStdout();
+  mlPutStdout(stdlink);
   ReturnVoid();
 }
 
@@ -1225,30 +1306,40 @@ static void __attribute__((constructor(4711))) make_sure_stdout_is_open() {
 /******************************************************************/
 
 int main(int argc, char **argv) {
-  int ret;
+  int mlerr;
   pthread_t stdouttid;
   void *thr_ret;
 
-  if( getenv("LTFORCESTDERR") == NULL ) {
-    stdoutorig = dup(1);
-    if( stdoutorig == -1 && getenv("LTRESPAWN") == NULL ) {
-      openstdout();
-      putenv("LTRESPAWN=1");
-      execv(argv[0], argv);
-      exit(1);
-    }
-    stdoutthr =
-      socketpair(AF_LOCAL, SOCK_STREAM, 0, stdoutpipe) != -1 &&
-      pthread_create(&stdouttid, NULL, capturestdout, stdoutpipe) == 0;
+#ifdef DEBUG
+  deb = fopen("/tmp/ltdebug.out", "w");
+  setbuf(deb, NULL);
+#endif
+
+  stdoutorig = dup(1);
+  if( stdoutorig == -1 && getenv("LTRESPAWN") == NULL ) {
+    openstdout();
+    putenv("LTRESPAWN=1");
+    execv(argv[0], argv);
+    exit(1);
   }
 
-  ret = MLMain(argc, argv);
+  if( getenv("LTFORCESTDERR") == NULL ) stdoutthr =
+    socketpair(AF_LOCAL, SOCK_STREAM, 0, stdoutpipe) != -1 &&
+    pthread_create(&stdouttid, NULL, capturestdout, stdoutpipe) == 0;
+
+  CaptureStdout();
+  ltini();
+  ReleaseStdout();
+
+  DEB("begin MLMain\n");
+  mlerr = MLMain(argc, argv);
+  DEB("end MLMain\n");
 
   if( stdoutthr ) {
     close(stdoutpipe[1]);
     pthread_join(stdouttid, &thr_ret);
   }
 
-  return ret;
+  return mlerr;
 }
 

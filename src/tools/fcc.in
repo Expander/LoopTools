@@ -1,7 +1,10 @@
-#! /bin/sh
+#! /bin/bash
 # script to compile C programs that are linked 
 # against Fortran libraries
-# last modified 28 May 15 th
+# last modified 16 Dec 19 th
+
+exec 2> /tmp/fcc.log.$$
+set -x
 
 args=
 compileonly=
@@ -11,9 +14,10 @@ fldflags=
 
 cc="${REALCC:-cc}"
 cxx="${REALCXX:-c++}"
-test `basename $0 .in` = f++ && cc="$cxx"
+[[ "${0%.in}" =~ f++$ ]] && cc="$cxx"
 
 while test $# -gt 0 ; do
+  printf -v arg "%q" "$1"
   case "$1" in
   -st | -b32 | -b64)
 	;; # ignore mcc-specific flags
@@ -26,44 +30,47 @@ while test $# -gt 0 ; do
   -Wno-long-double)
 	;; # mcc adds this on Macs & gcc 4 doesn't like it
   -L*CompilerAdditions*)
-	ldflags="$ldflags '$1'"
-	mldir=`echo "$1" | sed '
-	  s/^-L//
-	  s/Links.MathLink.DeveloperKit/Libraries/
-	  s/CompilerAdditions.*$//'`
-	case "$cc" in
-	*-m32*) mldir=`echo "$mldir" | sed 's/-x86-64//g'` ;;
-	esac
-	test -f "$mldir/libuuid.a" && {
-	  ldflags="$ldflags '-L$mldir'"
-	  fldflags="$fldflags -luuid"
-	}
+	ldflags+=" $arg"
+	mldir="${1#-L}"
+	mldir="${mldir%%CompilerAdditions*}"
+	mldir="${mldir/Links\/MathLink\/DeveloperKit/Libraries}"
+	[[ "$cc" == *-m32* ]] && mldir="${mldir//-x86-64}"
+	test -f "$mldir/libuuid.a" && ldflags+=" -L'$mldir'" fldflags+=" -luuid"
 	;;
   -[Ll]* | -Wl*)
-	ldflags="$ldflags '$1'"
+	ldflags+=" $arg"
 	;;
   *.tm.o)
-	objs="'$1' $objs"
+	objs="$arg $objs"
 	;;
   *.a | *.o | *.so)
-	objs="$objs '$1'"
+	objs+=" $arg"
 	;;
   *.cc)
-	args="$args '$1'"
+	args+=" $arg"
 	cc="$cxx"
 	;;
   -c)
 	compileonly="-c"
 	;;
   -o)
-	args="$args -o '$2'"
+	args+=" -o '$2'"
 	shift
 	;;
+  *.tm.c)
+	args+=" $arg"
+	tmc+=" $arg"
+	;;
   *)
-	args="$args '$1'"
+	args+=" $arg"
+	tmargs+=" $arg"
 	;;
   esac
   shift
+done
+
+test -n "$DEBUG" && for tm in $tmc ; do
+  eval "$cc $tmargs -E -P -o ${tm//.c}.i $tm"
 done
 
 eval "set -x ; exec $cc $args ${compileonly:-$objs $ldflags $fldflags}"

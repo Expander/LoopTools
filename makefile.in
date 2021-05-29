@@ -3,7 +3,6 @@ BLD = build$(QUADSUFFIX)
 LIBDIR = $(PREFIX)/lib$(LIBDIRSUFFIX)
 INCLUDEDIR = $(PREFIX)/include
 BINDIR = $(PREFIX)/bin
-PKGCFGDIR = $(LIBDIR)/pkgconfig
 
 LIB = libooptools$(QUADSUFFIX).a
 FE = lt$(QUADSUFFIX)$(EXE)
@@ -40,10 +39,9 @@ default all lib frontend mma: force
 
 install: lib frontend
 	-mkdir $(PREFIX)
-	-mkdir $(LIBDIR) $(BINDIR) $(INCLUDEDIR) $(PKGCFGDIR)
+	-mkdir $(LIBDIR) $(BINDIR) $(INCLUDEDIR)
 	cp -p $(BLD)/$(LIB) $(LIBDIR)
 	cp -p $(INCLUDE) $(INCLUDEDIR)
-	cp -p looptools.pc $(PKGCFGDIR)
 	strip $(BLD)/$(FE)
 	cp -p $(BLD)/fcc $(BLD)/$(FE) $(BINDIR)
 	rm -f $(BINDIR)/f++
